@@ -4,7 +4,7 @@ import { fa, weightFa, groupedFa, clockFa, durationFa, restFa, setFa, targetFa, 
   jFull, jShort, jMedium, jNum, timeFa, weekStart, addDays, startOfDay, WEEK_SHORT, jOf } from './util.js';
 import { ic } from './icons.js';
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const $app = document.getElementById('app');
 const $ov = document.getElementById('ov');
 const ui = {
@@ -190,12 +190,13 @@ function viewHome() {
     const selId = days.some((d) => d.id === ui.homeDay) ? ui.homeDay : nextId;
     const d = D.day(selId);
     const des = D.dayExercisesOf(d.id);
+    const hl = D.supersetLabels(des);
     const s = dayStats(d.id);
     h += `<div class="card hero"><div class="row sb" style="align-items:flex-start"><div class="col grow"><div class="big">روز ${fa(d.position + 1)}</div>${d.name ? `<div class="t1 muted">${esc(d.name)}</div>` : ''}</div>
       ${d.id === nextId ? `<span class="chip acc">${ic('flame', 16)} امروز</span>` : ''}</div>`;
     if (des.length) {
       h += `<div class="chips" style="margin-top:14px"><span class="chip">${ic('dumbbell', 16)} ${fa(s.n)} حرکت</span><span class="chip">${ic('check', 16)} ${fa(s.sets)} ست</span><span class="chip">${ic('clock', 16)} ~${fa(s.min)} دقیقه</span></div>
-      <ul class="exlist">${des.slice(0, 5).map((x) => `<li><span class="ell">${esc(exName(x.exerciseId))}</span><span class="muted small">${fa(x.targetSets)} × ${targetFa(x.repMin, x.repMax, isTimed(x.exerciseId))}</span></li>`).join('')}
+      <ul class="exlist">${des.slice(0, 5).map((x) => `<li><span class="ell">${ssTag(hl.get(x.id), 'xs')}${esc(exName(x.exerciseId))}</span><span class="muted small">${fa(x.targetSets)} × ${targetFa(x.repMin, x.repMax, isTimed(x.exerciseId))}</span></li>`).join('')}
       ${des.length > 5 ? `<li class="dim small">+${fa(des.length - 5)}</li>` : ''}</ul>
       <button class="btn" data-a="start" data-id="${d.id}">${ic('play', 20)} شروع تمرین</button>`;
     } else {
@@ -243,37 +244,69 @@ function viewProgram() {
 }
 
 // ------------------------------------------------------------ day editor
+function ssTag(ss, size = '') { return ss ? `<span class="sstag ${size}" style="--ss:${ss.color}">${ss.letter}${fa(ss.n)}</span>` : ''; }
+function ssHeader(ss, rest) {
+  return `<div class="sshd"><span class="ssname">${ic('link', 15)} سوپرست ${ss.letter}</span><span class="chip sm">${ic('hourglass', 13)} ${restFa(rest)}</span></div>`;
+}
 function viewDay(t) {
   const d = D.day(t.id); if (!d) return null;
   const des = D.dayExercisesOf(d.id);
+  const labels = D.supersetLabels(des);
   let h = `<div class="top">${backBtn()}<div class="grow"><h2>روز ${fa(d.position + 1)}</h2>${d.name ? `<div class="sub ell">${esc(d.name)}</div>` : ''}</div><button class="iconbtn" data-a="renameDay" data-id="${d.id}" aria-label="تغییر نام">${ic('edit')}</button></div>`;
   if (!des.length) h += `<div class="empty"><div class="ebig">${ic('dumbbell', 40)}</div><h3>بدون حرکت</h3></div>`;
-  des.forEach((x, i) => {
-    const e = D.exercise(x.exerciseId); const timed = !!e?.timed;
-    h += `<div class="item" data-a="editDe" data-id="${x.id}" style="align-items:flex-start"><div class="badge sm">${fa(i + 1)}</div>
+  const item = (x, i) => {
+    const e = D.exercise(x.exerciseId); const timed = !!e?.timed; const ss = labels.get(x.id);
+    return `<div class="item" data-a="editDe" data-id="${x.id}" style="align-items:flex-start">${ss ? `<div class="badge sm ssb" style="--ss:${ss.color}">${ss.letter}${fa(ss.n)}</div>` : `<div class="badge sm">${fa(i + 1)}</div>`}
       <div class="grow"><div class="t2">${esc(e?.name)}</div><div class="chips" style="margin-top:8px">
       <span class="chip acc sm">${timed ? ic('timer', 13) : ''}${fa(x.targetSets)} × ${targetFa(x.repMin, x.repMax, timed)}</span>
-      <span class="chip sm">${ic('hourglass', 13)} ${restFa(x.restSec)}</span>
+      ${ss ? '' : `<span class="chip sm">${ic('hourglass', 13)} ${restFa(x.restSec)}</span>`}
       ${x.targetWeight ? `<span class="chip sm">${weightFa(x.targetWeight)} کیلو</span>` : ''}
       ${e?.perSide ? '<span class="chip sm">هر سمت</span>' : ''}</div>
       ${x.note ? `<div class="muted small" style="margin-top:6px">${esc(x.note)}</div>` : ''}</div>
       <button class="iconbtn" data-a="deMenu" data-id="${x.id}" aria-label="گزینه‌ها">${ic('more')}</button></div>`;
+  };
+  // connector between two neighbours: tap to link / unlink
+  const lnk = (a, b) => {
+    const on = a.supersetId != null && a.supersetId === b.supersetId; const ss = labels.get(a.id);
+    return `<div class="lnkrow"><button class="lnk ${on ? 'on' : ''}" ${on ? `style="--ss:${ss.color}"` : ''} data-a="ssToggle" data-id="${a.id}" aria-label="${on ? 'جدا کردن' : 'سوپرست'}">${ic('link', 16)}</button></div>`;
+  };
+  const blocks = D.blocksOf(des);
+  blocks.forEach((bk, k) => {
+    const ss = labels.get(bk.items[0].id);
+    if (ss) {
+      h += `<div class="ssg" style="--ss:${ss.color}">${ssHeader(ss, D.groupRest(des, bk.items[0]))}`;
+      bk.items.forEach((x, j) => { h += item(x, des.indexOf(x)); if (j < bk.items.length - 1) h += lnk(x, bk.items[j + 1]); });
+      h += `</div>`;
+    } else h += item(bk.items[0], des.indexOf(bk.items[0]));
+    const nb = blocks[k + 1];
+    if (nb) h += lnk(bk.items[bk.items.length - 1], nb.items[0]);
   });
   return { html: h, fab: `<button class="btn fab" data-a="addDe" data-id="${d.id}">${ic('plus', 22)} افزودن حرکت</button>` };
 }
 
 // ------------------------------------------------------------ workout
+/** Exercises + the order sets should be done in: straight sets, supersets alternate round by round (A1,B1,A2,B2…). */
 function workoutModel(s) {
-  const blocks = D.sessionExercisesOf(s.id).map((se) => {
+  const ses = D.sessionExercisesOf(s.id);
+  const labels = D.supersetLabels(ses);
+  const blocks = ses.map((se) => {
     const e = D.exercise(se.exerciseId);
-    return { se, e, timed: !!e?.timed, sets: D.setsOf(se.id), prev: D.previousSets(se.exerciseId, s.id) };
+    return { se, e, timed: !!e?.timed, sets: D.setsOf(se.id), prev: D.previousSets(se.exerciseId, s.id), ss: labels.get(se.id) || null };
   });
+  const seq = [];
+  for (const g of D.blocksOf(ses)) {
+    const bis = g.items.map((se) => ses.indexOf(se));
+    if (bis.length < 2) { blocks[bis[0]].sets.forEach((x, r) => seq.push({ x, bi: bis[0], r, m: 0, gid: null })); continue; }
+    const max = Math.max(...bis.map((i) => blocks[i].sets.length));
+    for (let r = 0; r < max; r++) bis.forEach((bi, m) => { const x = blocks[bi].sets[r]; if (x) seq.push({ x, bi, r, m, gid: g.gid }); });
+  }
   let total = 0, done = 0; blocks.forEach((b) => { total += b.sets.length; done += b.sets.filter((x) => x.isDone).length; });
-  return { blocks, total, done };
+  return { ses, blocks, seq, total, done };
 }
-function nextInfo(blocks) {
-  for (const b of blocks) { const s = b.sets.find((x) => !x.isDone); if (s) return `بعدی: ${b.e.name}، ${setFa(s.weightKg, s.reps, b.timed)}`; }
-  return '';
+function nextInfo(m) {
+  const q = m.seq.find((y) => !y.x.isDone); if (!q) return '';
+  const b = m.blocks[q.bi];
+  return `بعدی: ${b.ss ? b.ss.letter + fa(b.ss.n) + ' ' : ''}${b.e.name}، ${setFa(q.x.weightKg, q.x.reps, b.timed)}`;
 }
 function holdText() {
   const hd = S.hold; if (!hd) return '';
@@ -289,34 +322,39 @@ function viewWorkout() {
   const header = `<div class="wtop">${backBtn()}<div class="ring"><svg width="52" height="52"><circle cx="26" cy="26" r="22" stroke="#232938" stroke-width="5" fill="none"/><circle cx="26" cy="26" r="22" stroke="#FF6B2C" stroke-width="5" fill="none" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - pct)}"/></svg><span>${fa(m.done)}/${fa(m.total)}</span></div>
     <div class="grow"><div class="t2 ell">${esc(s.title)}</div><div class="acc small" style="font-weight:700" data-tick="elapsed">${clockFa((Date.now() - s.startedAt) / 1000)}</div></div>
     ${timerBtn()}<button class="iconbtn" data-a="workoutMenu" aria-label="گزینه‌ها">${ic('more')}</button></div>`;
-  let h = '';
-  let curFound = false;
-  m.blocks.forEach((b, bi) => {
+  const curId = m.seq.find((q) => !q.x.isDone)?.x.id;
+  const card = (b, bi) => {
     const doneN = b.sets.filter((x) => x.isDone).length; const all = b.sets.length && doneN === b.sets.length;
-    h += `<div class="exc ${all ? 'alldone' : ''}" id="exc-${bi}"><div class="hd"><div class="grow"><div class="nm">${esc(b.e.name)}</div>
+    let c = `<div class="exc ${all ? 'alldone' : ''} ${b.ss ? 'inss' : ''}" id="exc-${bi}"><div class="hd">${ssTag(b.ss)}<div class="grow"><div class="nm">${esc(b.e.name)}</div>
       <div class="meta"><span>${fa(doneN)}/${fa(b.sets.length)}</span>${b.se.repMax ? `${ic('target', 14, 'acc')}<span>${targetFa(b.se.repMin, b.se.repMax, b.timed)}</span>` : ''}${b.e.perSide ? '<span class="chip sm acc">هر سمت</span>' : ''}</div></div>
       <button class="iconbtn" data-a="seMenu" data-id="${b.se.id}" aria-label="گزینه‌ها">${ic('more')}</button></div>
       ${b.se.note ? `<div class="note">${esc(b.se.note)}</div>` : ''}
       <div class="sh"><span>ست</span><span>قبلی</span><span>کیلو</span><span>${b.timed ? 'ثانیه' : 'تکرار'}</span><span></span></div>`;
     b.sets.forEach((x, i) => {
       const p = b.prev[i];
-      const isCur = !curFound && !x.isDone; if (isCur) curFound = true;
       if (S.hold && S.hold.setId === x.id) {
-        h += `<div class="sr hold" id="set-${x.id}"><div class="ix">${fa(i + 1)}</div><div class="htime" data-tick="hold">${holdText()}</div><button class="tick" data-a="holdStop" data-id="${x.id}" aria-label="توقف">${ic('stop', 26)}</button></div>`;
+        c += `<div class="sr hold" id="set-${x.id}"><div class="ix">${fa(i + 1)}</div><div class="htime" data-tick="hold">${holdText()}</div><button class="tick" data-a="holdStop" data-id="${x.id}" aria-label="توقف">${ic('stop', 26)}</button></div>`;
         return;
       }
-      const cls = x.isDone ? (x.isPr ? 'done pr' : 'done') : isCur ? 'cur' : '';
+      const cls = x.isDone ? (x.isPr ? 'done pr' : 'done') : x.id === curId ? 'cur' : '';
       const tickBtn = b.timed && !x.isDone
         ? `<button class="tick play" data-a="holdStart" data-id="${x.id}" aria-label="شروع">${ic('play', 26)}</button>`
         : `<button class="tick" data-a="tick" data-id="${x.id}" aria-label="ثبت">${x.isPr ? ic('trophy', 26) : ic('check', 28)}</button>`;
-      h += `<div class="sr ${cls}" id="set-${x.id}"><button class="ix" data-a="setMenu" data-id="${x.id}">${x.isPr ? ic('trophy', 18) : fa(i + 1)}</button>
+      c += `<div class="sr ${cls}" id="set-${x.id}"><button class="ix" data-a="setMenu" data-id="${x.id}">${x.isPr ? ic('trophy', 18) : fa(i + 1)}</button>
         <button class="prev" data-a="copyPrev" data-id="${x.id}" data-i="${i}">${p ? setFa(p.weightKg, p.reps, b.timed, true) : '–'}</button>
         <button class="val ${x.weightKg > 0 ? '' : 'ph'}" data-a="editSet" data-id="${x.id}">${x.weightKg > 0 ? weightFa(x.weightKg) : '–'}</button>
         <button class="val" data-a="editSet" data-id="${x.id}">${b.timed ? secFa(x.reps) : fa(x.reps)}</button>
         ${tickBtn}</div>`;
     });
-    h += `<button class="addset" data-a="addSet" data-id="${b.se.id}">${ic('plus', 20)} ست</button></div>`;
-  });
+    return c + `<button class="addset" data-a="addSet" data-id="${b.se.id}">${ic('plus', 20)} ست</button></div>`;
+  };
+  let h = '';
+  for (const g of D.blocksOf(m.ses)) {
+    const bis = g.items.map((se) => m.ses.indexOf(se));
+    const ss = m.blocks[bis[0]].ss;
+    if (ss) h += `<div class="ssg" style="--ss:${ss.color}">${ssHeader(ss, D.groupRest(m.ses, g.items[0]))}${bis.map((bi) => card(m.blocks[bi], bi)).join('')}</div>`;
+    else h += card(m.blocks[bis[0]], bis[0]);
+  }
   if (!m.blocks.length) h += `<div class="empty"><div class="ebig">${ic('dumbbell', 40)}</div><h3>بدون حرکت</h3></div>`;
   h += `<button class="btn sec" data-a="addSe">${ic('plus', 22)} افزودن حرکت</button>`;
   return { header, html: h, fab: `<button class="btn fab" data-a="finish">${ic('flag', 20)} پایان تمرین</button>` };
@@ -346,7 +384,7 @@ function viewSummary(t) {
   }
   h += `<div class="section-t">حرکت‌ها</div>`;
   sm.exercises.forEach((e) => {
-    h += `<div class="item" style="min-height:60px" data-a="openEx" data-id="${e.exerciseId}"><div class="grow"><div class="t2 ell">${esc(e.name)}</div><div class="muted small">${fa(e.doneSets)} ست${e.volume ? ` · ${groupedFa(e.volume)} کیلو` : ''}</div></div><div class="t2">${setFa(e.best[0], e.best[1], e.timed)}</div></div>`;
+    h += `<div class="item" style="min-height:60px" data-a="openEx" data-id="${e.exerciseId}">${ssTag(e.ss)}<div class="grow"><div class="t2 ell">${esc(e.name)}</div><div class="muted small">${fa(e.doneSets)} ست${e.volume ? ` · ${groupedFa(e.volume)} کیلو` : ''}</div></div><div class="t2">${setFa(e.best[0], e.best[1], e.timed)}</div></div>`;
   });
   return { html: h, fab: `<button class="btn fab" data-a="home">${ic('home', 22)} خانه</button>` };
 }
@@ -460,7 +498,7 @@ function viewExercise(t) {
   }
   h += `<div class="section-t">جلسات</div>`;
   sess.sort((p, q) => q.at - p.at).forEach((s) => {
-    h += `<div class="card" data-a="openSession" data-id="${s.sid}"><div class="t2">${jFull(s.at)}</div><div class="muted small">${esc(s.title)}</div>${setBoxes(s.sets, timed)}</div>`;
+    h += `<div class="card" data-a="openSession" data-id="${s.sid}"><div class="t2">${jFull(s.at)}</div><div class="muted small">${esc(s.title)}</div>${(() => { const p = D.partnersOf(s.sets[0].sessionExerciseId); return p.length ? `<div class="sswith small">${ic('link', 13)} با ${p.map((x) => esc(exName(x.exerciseId))).join('، ')}</div>` : ''; })()}${setBoxes(s.sets, timed)}</div>`;
   });
   return { html: h };
 }
@@ -469,9 +507,11 @@ function viewSession(t) {
   const vol = D.sessionVolume(s.id);
   let h = `<div class="top">${backBtn()}<div class="grow"><h2 class="ell">${esc(s.title)}</h2><div class="sub">${jFull(s.startedAt)} · ${timeFa(s.startedAt)}</div></div><button class="iconbtn" data-a="delSession" data-id="${s.id}" aria-label="حذف">${ic('trash')}</button></div>`;
   h += `<div class="chips" style="margin-bottom:14px"><span class="chip">${ic('clock', 16)} ${durationFa(s.endedAt - s.startedAt)}</span><span class="chip">${ic('layers', 16)} ${fa(D.sessionDoneSets(s.id))} ست</span>${vol ? `<span class="chip">${ic('dumbbell', 16)} ${groupedFa(vol)} کیلو</span>` : ''}</div>`;
-  for (const se of D.sessionExercisesOf(s.id)) {
+  const sesl = D.sessionExercisesOf(s.id); const lab = D.supersetLabels(sesl);
+  for (const se of sesl) {
     const e = D.exercise(se.exerciseId); const l = D.setsOf(se.id).filter((x) => x.isDone); if (!l.length) continue;
-    h += `<div class="card" data-a="openEx" data-id="${e.id}"><div class="row sb"><span class="t2">${esc(e.name)}</span>${ic('chev', 18, 'dim')}</div>${setBoxes(l, e.timed)}</div>`;
+    const ss = lab.get(se.id);
+    h += `<div class="card ${ss ? 'sscard' : ''}" ${ss ? `style="--ss:${ss.color}"` : ''} data-a="openEx" data-id="${e.id}"><div class="row sb"><span class="row t2">${ssTag(ss)}${esc(e.name)}</span>${ic('chev', 18, 'dim')}</div>${setBoxes(l, e.timed)}</div>`;
   }
   return { html: h };
 }
@@ -669,20 +709,28 @@ window.addEventListener('pagehide', () => D.save(true));
 // ============================================================ actions
 function doTick(setId) {
   const s = D.openSession(); if (!s) return;
-  const before = workoutModel(s);
-  const bi = before.blocks.findIndex((b) => b.sets.some((x) => x.id === setId));
   const r = D.toggleSet(setId); if (!r) return;
   haptic();
   if (!r.nowDone) { render(); return; }
-  const after = workoutModel(s);
-  if (st().autoRest && after.done < after.total) startRest(r.restSec, nextInfo(after.blocks));
-  const b = after.blocks[bi];
+  const m = workoutModel(s);
+  const me = m.seq.find((q) => q.x.id === setId);
+  const b = me ? m.blocks[me.bi] : null;
+  // superset: go straight to the next exercise of the same round, rest only after the round
+  let next = null, roundOver = true;
+  if (me && me.gid != null) {
+    const g = m.seq.filter((q) => q.gid === me.gid); const k = g.indexOf(me);
+    next = [...g.slice(k + 1), ...g.slice(0, k)].find((q) => !q.x.isDone) || null;
+    if (next) roundOver = !(next.r === me.r && next.m > me.m);
+  }
+  if (!roundOver) { if (S.rest && S.rest.kind !== 'timer') endRest(); }
+  else if (st().autoRest && m.done < m.total) startRest(r.restSec, nextInfo(m));
   if (r.prs.length) { prToast(`رکورد! ${esc(b?.e.name || '')} · ${setFa(r.set.weightKg, r.set.reps, b?.timed)}`); beep('pr'); }
   render();
+  const focusRow = (id) => setTimeout(() => { const el = document.getElementById('set-' + id); if (!el) return; el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.classList.add('pulse'); }, 80);
+  if (next) { focusRow(next.x.id); return; }
   if (b && b.sets.every((x) => x.isDone)) {
-    let nn = after.blocks.findIndex((x, i) => i > bi && !x.sets.every((y) => y.isDone));
-    if (nn < 0) nn = after.blocks.findIndex((x, i) => i !== bi && !x.sets.every((y) => y.isDone));
-    if (nn >= 0) setTimeout(() => document.getElementById('exc-' + nn)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
+    const q = m.seq.find((y) => !y.x.isDone);
+    if (q) setTimeout(() => document.getElementById('exc-' + q.bi)?.closest('.ssg, .exc')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 120);
   }
 }
 function readSetInputs() {
@@ -703,6 +751,15 @@ async function shareFile(name, text, type) {
   toast('ذخیره شد ✅');
 }
 
+/** «سوپرست با بعدی / قبلی» and «جدا کردن» menu items for an exercise in a list. */
+function ssMenu(list, x, link, unlink) {
+  const i = list.indexOf(x); const nx = list[i + 1], pv = list[i - 1]; const out = [];
+  const same = (o) => o && x.supersetId != null && o.supersetId === x.supersetId;
+  if (nx && !same(nx)) out.push({ icon: 'link', label: `سوپرست با ${exName(nx.exerciseId)}`, fn: () => { link(x.id); haptic(); render(); } });
+  if (pv && !same(pv)) out.push({ icon: 'link', label: `سوپرست با ${exName(pv.exerciseId)}`, fn: () => { link(pv.id); haptic(); render(); } });
+  if (x.supersetId != null) out.push({ icon: 'unlink', label: 'جدا کردن از سوپرست', fn: () => { unlink(x.id); render(); } });
+  return out;
+}
 const A = {
   tab: (d) => { ui.tab = d.k; ui.stack = []; render(true); },
   back: () => goBack(),
@@ -761,6 +818,7 @@ const A = {
       { icon: 'edit', label: 'ویرایش', fn: () => A.editDe({ id: x.id }) },
       { icon: 'up', label: 'بالا', fn: () => { D.moveDayExercise(x.id, -1); render(); } },
       { icon: 'down', label: 'پایین', fn: () => { D.moveDayExercise(x.id, 1); render(); } },
+      ...ssMenu(D.dayExercisesOf(x.dayId), x, D.dayLink, D.dayUnlink),
       { icon: 'history', label: 'تاریخچه', fn: () => push({ v: 'exercise', id: x.exerciseId }) },
       { icon: 'trash', label: 'حذف', danger: true, fn: () => { const snap = D.deleteDayExercise(x.id); withUndo(`«${name}» حذف شد`, () => D.restoreDayExercise(snap)); render(); } },
     ]);
@@ -829,10 +887,20 @@ const A = {
       { icon: 'history', label: 'تاریخچه', fn: () => push({ v: 'exercise', id: se.exerciseId }) },
       { icon: 'up', label: 'بالا', fn: () => { D.moveSessionExercise(se.id, -1); render(); } },
       { icon: 'down', label: 'پایین', fn: () => { D.moveSessionExercise(se.id, 1); render(); } },
+      ...ssMenu(D.sessionExercisesOf(se.sessionId), se, D.sessionLink, D.sessionUnlink),
       { icon: 'trash', label: 'حذف', danger: true, fn: () => { if (S.hold && D.setsOf(se.id).some((x) => x.id === S.hold.setId)) S.hold = null; const snap = D.removeSessionExercise(se.id); withUndo(`«${name}» حذف شد`, () => D.restoreSessionExercise(snap)); render(); } },
     ]);
   },
   tick: (d) => doTick(+d.id),
+  ssToggle: (d) => {
+    const x = D.byId(S.dayExercises, +d.id); const l = D.dayExercisesOf(x.dayId); const nx = l[l.indexOf(x) + 1];
+    if (nx && x.supersetId != null && nx.supersetId === x.supersetId) {
+      // break the chain between x and nx: the part after x becomes its own group
+      const gid = x.supersetId; const tail = l.slice(l.indexOf(nx)).filter((y) => y.supersetId === gid);
+      const n = D.newGroupId(); tail.forEach((y) => (y.supersetId = n)); D.normalizeSupersets(l); D.save();
+    } else D.dayLink(x.id);
+    haptic(); render();
+  },
   holdStart: (d) => startHold(+d.id),
   holdStop: () => stopHold(),
   holdCancel: () => { S.hold = null; D.save(); render(); },

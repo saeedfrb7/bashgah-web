@@ -132,6 +132,90 @@ export function previousSets(exId, excludeSessionId) {
   return h.filter((x) => x.sessionId === last).sort((a, b) => a.setIndex - b.setIndex);
 }
 
+// ------------------------------------------------------------ supersets
+// Members of a superset share the same non-null `supersetId` and are always consecutive in a list.
+export const SS_COLORS = ['#5B8CFF', '#3DDC97', '#B57BFF', '#FF6FAE', '#2FD1E0', '#FFB020'];
+export const SS_LETTERS = 'ABCDEFGHIJ';
+/** Fix a sorted list in place: split non-consecutive runs, drop single-member groups. */
+export function normalizeSupersets(list) {
+  const seen = new Set();
+  let i = 0;
+  while (i < list.length) {
+    const g = list[i].supersetId ?? null;
+    let j = i; while (j + 1 < list.length && g != null && (list[j + 1].supersetId ?? null) === g) j++;
+    if (g != null) {
+      if (j === i) list[i].supersetId = null;
+      else if (seen.has(g)) { const n = id(); for (let k = i; k <= j; k++) list[k].supersetId = n; seen.add(n); }
+      else seen.add(g);
+    } else list[i].supersetId = null;
+    i = j + 1;
+  }
+  return list;
+}
+/** Blocks for a sorted list: [{gid, items}] — single exercises are blocks of one. */
+export function blocksOf(list) {
+  const out = [];
+  for (const x of list) {
+    const last = out[out.length - 1];
+    if (x.supersetId != null && last && last.gid === x.supersetId) last.items.push(x);
+    else out.push({ gid: x.supersetId ?? null, items: [x] });
+  }
+  return out;
+}
+/** id -> {letter, n, size, color, first, last} for grouped items in a sorted list. */
+export function supersetLabels(list) {
+  const m = new Map(); let gi = 0;
+  for (const b of blocksOf(list)) {
+    if (b.gid == null || b.items.length < 2) continue;
+    const letter = SS_LETTERS[gi % SS_LETTERS.length], color = SS_COLORS[gi % SS_COLORS.length]; gi++;
+    b.items.forEach((x, k) => m.set(x.id, { letter, n: k + 1, size: b.items.length, color, first: k === 0, last: k === b.items.length - 1, gid: b.gid }));
+  }
+  return m;
+}
+function linkWithNext(list, idx) {
+  const a = list[idx], b = list[idx + 1]; if (!a || !b) return false;
+  const gid = a.supersetId ?? b.supersetId ?? id();
+  const old = b.supersetId;
+  if (old != null && old !== gid) list.forEach((x) => { if (x.supersetId === old) x.supersetId = gid; });
+  a.supersetId = gid; b.supersetId = gid;
+  // one rest for the whole group: use the rest of its last member
+  const mem = list.filter((x) => x.supersetId === gid);
+  const rest = mem[mem.length - 1].restSec; mem.forEach((x) => (x.restSec = rest));
+  normalizeSupersets(list); return true;
+}
+function unlinkItem(list, idx) { const a = list[idx]; if (!a) return; a.supersetId = null; normalizeSupersets(list); }
+/** Move an item; inside a group it swaps with its neighbour, otherwise whole blocks move so groups stay together. */
+function moveInList(list, item, delta) {
+  const i = list.indexOf(item); if (i < 0) return false;
+  const nb = list[i + delta];
+  if (item.supersetId != null && nb && nb.supersetId === item.supersetId) { list[i] = nb; list[i + delta] = item; }
+  else {
+    const blocks = blocksOf(list);
+    const bi = blocks.findIndex((b) => b.items.includes(item));
+    const bj = bi + delta; if (bj < 0 || bj >= blocks.length) return false;
+    [blocks[bi], blocks[bj]] = [blocks[bj], blocks[bi]];
+    list.length = 0; blocks.forEach((b) => list.push(...b.items));
+  }
+  list.forEach((x, k) => (x.position = k));
+  return true;
+}
+export function dayLink(deId) { const d = byId(S.dayExercises, deId); if (!d) return; const l = dayExercisesOf(d.dayId); linkWithNext(l, l.indexOf(d)); save(); }
+export function dayUnlink(deId) { const d = byId(S.dayExercises, deId); if (!d) return; const l = dayExercisesOf(d.dayId); unlinkItem(l, l.indexOf(d)); save(); }
+export function sessionLink(seId) { const x = byId(S.sessionExercises, seId); if (!x) return; const l = sessionExercisesOf(x.sessionId); linkWithNext(l, l.indexOf(x)); save(); }
+export function sessionUnlink(seId) { const x = byId(S.sessionExercises, seId); if (!x) return; const l = sessionExercisesOf(x.sessionId); unlinkItem(l, l.indexOf(x)); save(); }
+export const newGroupId = () => id();
+/** Other members of a session exercise's superset. */
+export function partnersOf(seId) {
+  const se = byId(S.sessionExercises, seId); if (!se || se.supersetId == null) return [];
+  return sessionExercisesOf(se.sessionId).filter((x) => x.supersetId === se.supersetId && x.id !== se.id);
+}
+/** Rest after a set: inside a superset it's the group's rest (its last member's). */
+export function groupRest(list, item) {
+  if (item.supersetId == null) return item.restSec;
+  const mem = list.filter((x) => x.supersetId === item.supersetId);
+  return mem[mem.length - 1].restSec;
+}
+
 // ------------------------------------------------------------ programs
 export function createProgram(name) {
   const hasActive = !!activeProgram();
@@ -197,23 +281,27 @@ export function saveDayExercise(deId, dayId, f) {
   const rMin = Math.max(1, Math.min(999, f.repMin)); const rMax = Math.max(rMin, f.repMax);
   const vals = { exerciseId: exId, targetSets: Math.max(1, Math.min(20, f.sets)), repMin: rMin, repMax: rMax,
     targetWeight: f.weight ?? null, restSec: f.restSec, note: (f.note || '').trim() || null };
-  if (deId == null) S.dayExercises.push({ id: id(), dayId, position: dayExercisesOf(dayId).length, ...vals });
-  else Object.assign(byId(S.dayExercises, deId), vals);
+  if (deId == null) S.dayExercises.push({ id: id(), dayId, position: dayExercisesOf(dayId).length, supersetId: null, ...vals });
+  else {
+    const cur = byId(S.dayExercises, deId); Object.assign(cur, vals);
+    if (cur.supersetId != null) S.dayExercises.filter((x) => x.dayId === dayId && x.supersetId === cur.supersetId).forEach((x) => (x.restSec = vals.restSec));
+  }
   save();
 }
 export function deleteDayExercise(deId) {
   const d = byId(S.dayExercises, deId); if (!d) return null;
+  const groups = dayExercisesOf(d.dayId).map((x) => [x.id, x.supersetId ?? null]);
   S.dayExercises = S.dayExercises.filter((x) => x.id !== deId);
-  dayExercisesOf(d.dayId).forEach((x, i) => (x.position = i)); save(); return { ...d };
+  const l = dayExercisesOf(d.dayId); l.forEach((x, i) => (x.position = i)); normalizeSupersets(l); save(); return { ...d, _groups: groups };
 }
 export function restoreDayExercise(d) {
-  dayExercisesOf(d.dayId).filter((x) => x.position >= d.position).forEach((x) => x.position++);
-  S.dayExercises.push(d); save();
+  const { _groups, ...de } = d;
+  dayExercisesOf(de.dayId).filter((x) => x.position >= de.position).forEach((x) => x.position++);
+  S.dayExercises.push(de); restoreGroups(S.dayExercises, _groups); normalizeSupersets(dayExercisesOf(de.dayId)); save();
 }
 export function moveDayExercise(deId, delta) {
   const d = byId(S.dayExercises, deId); if (!d) return;
-  const list = dayExercisesOf(d.dayId); const i = list.indexOf(d); const j = Math.max(0, Math.min(list.length - 1, i + delta));
-  if (i === j) return; list.splice(i, 1); list.splice(j, 0, d); list.forEach((x, k) => (x.position = k)); save();
+  if (moveInList(dayExercisesOf(d.dayId), d, delta)) save();
 }
 // ------------------------------------------------------------ workout
 export function nextDayId() {
@@ -230,7 +318,7 @@ export function startWorkout(dayId) {
     startedAt: Date.now(), endedAt: null, note: null, excludeFromTrends: false };
   S.sessions.push(s);
   if (d) dayExercisesOf(d.id).forEach((de, idx) => {
-    const se = { id: id(), sessionId: s.id, exerciseId: de.exerciseId, position: idx, repMin: de.repMin, repMax: de.repMax, restSec: de.restSec, note: de.note ?? exercise(de.exerciseId)?.note ?? null };
+    const se = { id: id(), sessionId: s.id, exerciseId: de.exerciseId, position: idx, repMin: de.repMin, repMax: de.repMax, restSec: de.restSec, note: de.note ?? exercise(de.exerciseId)?.note ?? null, supersetId: de.supersetId ?? null };
     S.sessionExercises.push(se);
     const prev = previousSets(de.exerciseId, s.id);
     const timed = !!exercise(de.exerciseId)?.timed;
@@ -246,7 +334,7 @@ export function addExerciseToSession(sid, name, f = {}) {
   const exId = exerciseIdFor(name, f.timed ?? null, f.perSide ?? null);
   const ses = sessionExercisesOf(sid);
   const se = { id: id(), sessionId: sid, exerciseId: exId, position: ses.length ? Math.max(...ses.map((x) => x.position)) + 1 : 0,
-    repMin: 0, repMax: 0, restSec: f.restSec ?? S.settings.defaultRestSec, note: exercise(exId)?.note ?? null };
+    repMin: 0, repMax: 0, restSec: f.restSec ?? S.settings.defaultRestSec, note: exercise(exId)?.note ?? null, supersetId: null };
   S.sessionExercises.push(se);
   const prev = previousSets(exId, sid);
   const timed = !!exercise(exId)?.timed;
@@ -259,15 +347,15 @@ export function addExerciseToSession(sid, name, f = {}) {
 }
 export function removeSessionExercise(seId) {
   const se = byId(S.sessionExercises, seId); if (!se) return null;
-  const snap = { se: { ...se }, sets: setsOf(seId).map((x) => ({ ...x })) };
+  const snap = { se: { ...se }, sets: setsOf(seId).map((x) => ({ ...x })), groups: sessionExercisesOf(se.sessionId).map((x) => [x.id, x.supersetId ?? null]) };
   S.sessionExercises = S.sessionExercises.filter((x) => x.id !== seId);
-  S.sets = S.sets.filter((x) => x.sessionExerciseId !== seId); save(); return snap;
+  S.sets = S.sets.filter((x) => x.sessionExerciseId !== seId); normalizeSupersets(sessionExercisesOf(se.sessionId)); save(); return snap;
 }
-export function restoreSessionExercise(snap) { S.sessionExercises.push(snap.se); S.sets.push(...snap.sets); save(); }
+function restoreGroups(arr, groups) { if (!groups) return; const m = new Map(groups); arr.forEach((x) => { if (m.has(x.id)) x.supersetId = m.get(x.id); }); }
+export function restoreSessionExercise(snap) { S.sessionExercises.push(snap.se); S.sets.push(...snap.sets); restoreGroups(S.sessionExercises, snap.groups); normalizeSupersets(sessionExercisesOf(snap.se.sessionId)); save(); }
 export function moveSessionExercise(seId, delta) {
   const se = byId(S.sessionExercises, seId); if (!se) return;
-  const list = sessionExercisesOf(se.sessionId); const i = list.indexOf(se); const j = Math.max(0, Math.min(list.length - 1, i + delta));
-  if (i === j) return; list.splice(i, 1); list.splice(j, 0, se); list.forEach((x, k) => (x.position = k)); save();
+  if (moveInList(sessionExercisesOf(se.sessionId), se, delta)) save();
 }
 export function setSessionExerciseNote(seId, note) {
   const se = byId(S.sessionExercises, seId); if (!se) return;
@@ -300,7 +388,7 @@ export function toggleSet(setId, forceDone = null) {
   s.isDone = done; s.doneAt = done ? Date.now() : null; s.isPr = false;
   const prs = recomputePrs(s.sessionExerciseId)[setId] || [];
   const se = byId(S.sessionExercises, s.sessionExerciseId);
-  save(); return { nowDone: done, prs: done ? prs : [], restSec: se?.restSec ?? 90, set: s };
+  save(); return { nowDone: done, prs: done ? prs : [], restSec: se ? groupRest(sessionExercisesOf(se.sessionId), se) : 90, set: s };
 }
 function recomputePrs(seId) {
   const se = byId(S.sessionExercises, seId); if (!se) return {};
@@ -326,6 +414,7 @@ export function finishWorkout(sid) {
     if (!l.length) S.sessionExercises = S.sessionExercises.filter((x) => x.id !== se.id);
     else l.forEach((x, i) => (x.setIndex = i));
   }
+  normalizeSupersets(sessionExercisesOf(sid));
   byId(S.sessions, sid).endedAt = Date.now();
   S.rest = null; S.hold = null;
   save(true); return true;
@@ -341,6 +430,7 @@ export function deleteSession(sid) {
 export function summary(sid) {
   const s = byId(S.sessions, sid); if (!s) return null;
   const ses = sessionExercisesOf(sid);
+  const labels = supersetLabels(ses);
   let vol = 0, done = 0; const prs = []; const results = [];
   for (const se of ses) {
     const ex = exercise(se.exerciseId); const timed = !!ex?.timed;
@@ -365,7 +455,7 @@ export function summary(sid) {
     }
     for (const k in found) if (!(k === 'REPS' && found.MAX_WEIGHT)) prs.push(found[k]);
     const best = timed || l.every((x) => x.weightKg <= 0) ? l.reduce((a, b) => (b.reps > a.reps ? b : a)) : l.reduce((a, b) => (e1rm(b.weightKg, b.reps) > e1rm(a.weightKg, a.reps) ? b : a));
-    results.push({ name: ex.name, exerciseId: ex.id, doneSets: l.length, volume: v, best: [best.weightKg, best.reps], timed });
+    results.push({ name: ex.name, exerciseId: ex.id, doneSets: l.length, volume: v, best: [best.weightKg, best.reps], timed, ss: labels.get(se.id) || null });
   }
   let prevVol = null;
   if (s.programDayId != null) {
@@ -389,20 +479,22 @@ export function exportBackup() {
 export function decodeBackup(text) {
   let d; try { d = JSON.parse(text); } catch { throw new Error('فایل پشتیبان معتبر نیست'); }
   if (!d || d.format !== 'bashgah-backup') throw new Error('این فایل مربوط به اپ باشگاه نیست');
-  if (d.version > 2) throw new Error('این پشتیبان با نسخهٔ جدیدتر ساخته شده');
+  if (d.version > 3) throw new Error('این پشتیبان با نسخهٔ جدیدتر ساخته شده');
   for (const k of ['programs', 'days', 'exercises', 'dayExercises', 'sessions', 'sessionExercises', 'sets']) if (!Array.isArray(d[k])) throw new Error('فایل پشتیبان معتبر نیست');
   return d;
 }
 export function restoreBackup(d) {
   const keepName = S.settings.userName;
   const t = (a) => a.map((x) => ({ ...x }));
-  S.programs = t(d.programs); S.days = t(d.days); S.dayExercises = t(d.dayExercises);
+  S.programs = t(d.programs); S.days = t(d.days); S.dayExercises = d.dayExercises.map((x) => ({ supersetId: null, ...x }));
   S.exercises = d.exercises.map((x) => ({ note: null, archived: false, timed: false, perSide: false, ...x }));
   S.sessions = d.sessions.map((x) => ({ note: null, excludeFromTrends: false, ...x }));
-  S.sessionExercises = t(d.sessionExercises); S.sets = d.sets.map((x) => ({ isPr: false, type: 'NORMAL', ...x }));
+  S.sessionExercises = d.sessionExercises.map((x) => ({ supersetId: null, ...x })); S.sets = d.sets.map((x) => ({ isPr: false, type: 'NORMAL', ...x }));
   if (d.settings) S.settings = { ...DEFAULT_SETTINGS, ...d.settings, userName: d.settings.userName || keepName };
   const all = [S.programs, S.days, S.exercises, S.dayExercises, S.sessions, S.sessionExercises, S.sets].flat();
-  S.nextId = all.reduce((m, x) => Math.max(m, x.id || 0), 0) + 1;
+  S.nextId = all.reduce((m, x) => Math.max(m, x.id || 0, x.supersetId || 0), 0) + 1;
+  S.days.forEach((dd) => normalizeSupersets(dayExercisesOf(dd.id)));
+  S.sessions.forEach((ss) => normalizeSupersets(sessionExercisesOf(ss.id)));
   if (S.programs.length && !S.programs.some((p) => p.isActive)) S.programs[0].isActive = true;
   S.rest = null; S.hold = null; S.onboarded = true;
   save(true);
@@ -410,14 +502,15 @@ export function restoreBackup(d) {
 export function csv() {
   const q = (s) => '"' + String(s).replace(/"/g, '""') + '"';
   const p2 = (x) => String(x).padStart(2, '0');
-  let out = '\uFEFFdate_jalali,date_iso,time,workout,exercise,set,weight_kg,reps,seconds,volume,e1rm,pr\n';
+  let out = '\uFEFFdate_jalali,date_iso,time,workout,exercise,superset,set,weight_kg,reps,seconds,volume,e1rm,pr\n';
   const rows = [];
+  const lab = new Map(); S.sessions.forEach((ss) => supersetLabels(sessionExercisesOf(ss.id)).forEach((v, k) => lab.set(k, v.letter + v.n)));
   for (const e of S.exercises) for (const h of historyFor(e.id)) rows.push({ h, e });
   rows.sort((a, b) => a.h.startedAt - b.h.startedAt || a.e.name.localeCompare(b.e.name) || a.h.setIndex - b.h.setIndex);
   for (const { h, e } of rows) {
     const d = new Date(h.startedAt);
     out += [jIso(h.startedAt), `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`, `${p2(d.getHours())}:${p2(d.getMinutes())}`,
-      q(h.title), q(e.name), h.setIndex + 1, +h.weightKg.toFixed(2), e.timed ? '' : h.reps, e.timed ? h.reps : '',
+      q(h.title), q(e.name), lab.get(h.sessionExerciseId) || '', h.setIndex + 1, +h.weightKg.toFixed(2), e.timed ? '' : h.reps, e.timed ? h.reps : '',
       +volume(h.weightKg, h.reps, e.timed).toFixed(2), e.timed ? '' : +e1rm(h.weightKg, h.reps).toFixed(1), h.isPr ? 1 : 0].join(',') + '\n';
   }
   return out;
