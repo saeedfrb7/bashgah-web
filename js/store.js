@@ -20,21 +20,27 @@ function emptyState() {
 export let S = emptyState();
 
 // ------------------------------------------------------------ persistence
-let idb = null;
+// Every change is written synchronously to localStorage (survives iOS killing the app at any moment)
+// and then to IndexedDB. On load the newest/most complete copy wins, so a stale or broken store
+// can never replace real data. An empty (not onboarded) state never overwrites an onboarded one.
+const LS = 'bashgah_state', LS_BAK = 'bashgah_state_bak';
+let idb = null, idbTimer = null, allowWipe = false, storedOnboarded = false;
+const withTimeout = (p, ms, v) => Promise.race([p, new Promise((r) => setTimeout(() => r(v), ms))]);
 function openIdb() {
   return new Promise((res) => {
     try {
       const r = indexedDB.open(DB_NAME, 1);
       r.onupgradeneeded = () => r.result.createObjectStore(STORE);
-      r.onsuccess = () => res(r.result);
+      r.onsuccess = () => { const db = r.result; db.onclose = () => { if (idb === db) idb = null; }; db.onversionchange = () => db.close(); res(db); };
       r.onerror = () => res(null);
+      r.onblocked = () => res(null);
     } catch { res(null); }
   });
 }
-function idbGet(db) {
+function idbGet(db, key = KEY) {
   return new Promise((res) => {
     try {
-      const t = db.transaction(STORE, 'readonly').objectStore(STORE).get(KEY);
+      const t = db.transaction(STORE, 'readonly').objectStore(STORE).get(key);
       t.onsuccess = () => res(t.result ?? null);
       t.onerror = () => res(null);
     } catch { res(null); }
@@ -47,36 +53,74 @@ function idbPut(db, val) {
       tx.objectStore(STORE).put(val, KEY);
       tx.oncomplete = () => res(true);
       tx.onerror = () => res(false);
+      tx.onabort = () => res(false);
     } catch { res(false); }
   });
 }
+function parse(raw) { if (!raw) return null; try { const o = typeof raw === 'string' ? JSON.parse(raw) : raw; return o && typeof o === 'object' ? o : null; } catch { return null; } }
+function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+const size = (o) => ['programs', 'days', 'exercises', 'dayExercises', 'sessions', 'sessionExercises', 'sets'].reduce((n, k) => n + (o[k]?.length || 0), 0);
+/** Best copy: onboarded first, then most recently saved, then the one with more data. */
+export function pickBest(list) {
+  return list.filter(Boolean).sort((x, y) => (+!!y.onboarded - +!!x.onboarded) || ((y.savedAt || 0) - (x.savedAt || 0)) || (size(y) - size(x)))[0] || null;
+}
 export async function load() {
-  idb = await openIdb();
-  let raw = idb ? await idbGet(idb) : null;
-  if (!raw) { try { raw = localStorage.getItem('bashgah_state'); } catch {} }
-  if (raw) {
-    try {
-      const o = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      S = Object.assign(emptyState(), o);
-      S.settings = { ...DEFAULT_SETTINGS, ...(o.settings || {}) };
-    } catch { S = emptyState(); }
+  const fromLs = parse(lsGet(LS)), fromBak = parse(lsGet(LS_BAK));
+  idb = await withTimeout(openIdb(), 2500, null);
+  const fromIdb = idb ? parse(await withTimeout(idbGet(idb), 2500, null)) : null;
+  let o = pickBest([fromIdb, fromLs, fromBak]);
+  // an explicit «پاک کردن همه» is newer than any copy it replaced
+  const wiped = [fromLs, fromIdb].filter((x) => x && x.wipedAt).sort((x, y) => y.wipedAt - x.wipedAt)[0];
+  if (wiped && o && wiped !== o && wiped.wipedAt >= (o.savedAt || 0)) o = wiped;
+  if (o) {
+    S = Object.assign(emptyState(), o);
+    S.settings = { ...DEFAULT_SETTINGS, ...(o.settings || {}) };
+    storedOnboarded = !!S.onboarded;
+    // heal the other copies if they were stale
+    save(true);
   }
-  try { navigator.storage?.persist?.(); } catch {}
+  requestPersist();
 }
-let saveTimer = null;
+export function requestPersist() { try { navigator.storage?.persist?.().catch(() => {}); } catch {} }
 export function save(now = false) {
-  clearTimeout(saveTimer);
-  if (now) return flush();
-  saveTimer = setTimeout(flush, 150);
+  writeNow();
+  clearTimeout(idbTimer);
+  if (now) return writeIdb();
+  idbTimer = setTimeout(writeIdb, 120);
 }
-async function flush() {
-  const json = JSON.stringify(S);
+function guard() {
+  // never let a blank state replace saved data (only an explicit wipe may)
+  if (!S.onboarded && storedOnboarded && !allowWipe) return false;
+  return true;
+}
+let json = '';
+function writeNow() {
+  if (!guard()) return false;
+  S.savedAt = Date.now();
+  json = JSON.stringify(S);
   let ok = false;
-  if (idb) ok = await idbPut(idb, json);
-  try { localStorage.setItem('bashgah_state', json); ok = true; } catch {}
+  try { localStorage.setItem(LS, json); ok = true; } catch {}
+  if (S.onboarded) { try { localStorage.setItem(LS_BAK, json); } catch {} storedOnboarded = true; }
   return ok;
 }
-export function resetAll() { S = emptyState(); save(true); }
+async function writeIdb() {
+  if (!guard() || !json) return false;
+  const val = json;
+  if (!idb) idb = await withTimeout(openIdb(), 2500, null);
+  let ok = idb ? await idbPut(idb, val) : false;
+  if (!ok) { // iOS: "Connection to Indexed Database server lost" -> reconnect once
+    try { idb?.close(); } catch {}
+    idb = await withTimeout(openIdb(), 2500, null);
+    ok = idb ? await idbPut(idb, val) : false;
+  }
+  return ok;
+}
+export function resetAll() {
+  allowWipe = true; storedOnboarded = false;
+  S = emptyState(); S.wipedAt = Date.now();
+  try { localStorage.removeItem(LS_BAK); } catch {}
+  save(true); allowWipe = false;
+}
 
 const id = () => S.nextId++;
 

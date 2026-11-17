@@ -247,3 +247,5 @@ body.resting .with-nav .scroll{padding-bottom:110px}
 .sswith{display:flex;align-items:center;gap:5px;color:#8E97AA;margin-top:4px}
 .sr.pulse{animation:sspulse .9s ease}
 @keyframes sspulse{0%{box-shadow:0 0 0 0 rgba(255,107,44,.55)}100%{box-shadow:0 0 0 14px rgba(255,107,44,0)}}
+
+.onbhint{margin-top:18px;text-align:start;width:100%}

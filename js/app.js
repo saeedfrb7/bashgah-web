@@ -4,7 +4,7 @@ import { fa, weightFa, groupedFa, clockFa, durationFa, restFa, setFa, targetFa, 
   jFull, jShort, jMedium, jNum, timeFa, weekStart, addDays, startOfDay, WEEK_SHORT, jOf } from './util.js';
 import { ic } from './icons.js';
 
-const VERSION = '1.1.0';
+const VERSION = '1.1.1';
 const $app = document.getElementById('app');
 const $ov = document.getElementById('ov');
 const ui = {
@@ -163,6 +163,9 @@ function viewOnboarding() {
     <h1>اسمت چیه؟</h1>
     <input id="onbName" class="field" maxlength="24" autocomplete="given-name" enterkeyhint="done" value="${esc(ui.onbName)}" placeholder="نام">
     <button class="btn" data-a="onbDone">شروع</button>
+    <button class="btn ghost" data-a="importJson">${ic('history', 20)} بازیابی از پشتیبان</button>
+    ${isIOS && !isStandalone ? `<div class="card onbhint"><div class="row" style="gap:10px"><span class="badge sm">${ic('share', 18)}</span><span class="grow small">اول نصبش کن: <span style="display:inline-block;vertical-align:middle">${ic('share', 15, 'acc')}</span> ← <bdi>Add to Home Screen</bdi></span></div><div class="muted small" style="margin-top:6px">اطلاعات سافاری به اپ نصب‌شده منتقل نمی‌شه.</div></div>` : ''}
+    <input type="file" id="fileIn" accept=".json,application/json" class="hidden">
   </div></div>`;
 }
 
@@ -173,7 +176,7 @@ function viewHome() {
   const p = D.activeProgram();
   const days = p ? D.daysOf(p.id) : [];
   let h = `<div class="top greet"><h1 class="ell">سلام ${esc(name)} 👋</h1>${timerBtn()}</div><div class="motto">${motto()}</div>`;
-  if (isIOS && !isStandalone && !S.hintClosed) h += `<div class="card row" style="gap:12px;border-color:#3a2a22"><span class="badge sm">${ic('share', 18)}</span><span class="grow small">نصب: <span style="display:inline-block;vertical-align:middle">${ic('share', 16, 'acc')}</span> ← <bdi>Add to Home Screen</bdi></span><button class="iconbtn" data-a="closeHint" aria-label="بستن">${ic('x', 20)}</button></div>`;
+  if (isIOS && !isStandalone && !S.hintClosed) h += `<div class="card row" style="gap:12px;border-color:#3a2a22"><span class="badge sm">${ic('share', 18)}</span><span class="grow small">نصب: <span style="display:inline-block;vertical-align:middle">${ic('share', 16, 'acc')}</span> ← <bdi>Add to Home Screen</bdi></span><button class="chip acc sm" data-a="exportJson">انتقال</button><button class="iconbtn" data-a="closeHint" aria-label="بستن">${ic('x', 20)}</button></div>`;
   if (open) {
     const done = D.sessionDoneSets(open.id);
     h += `<div class="card hero"><span class="chip acc sm">${ic('flame', 14)} در جریان</span>
@@ -705,6 +708,7 @@ document.addEventListener('visibilitychange', () => {
   updateWakeLock();
 });
 window.addEventListener('pagehide', () => D.save(true));
+window.addEventListener('freeze', () => D.save(true));
 
 // ============================================================ actions
 function doTick(setId) {
@@ -768,7 +772,7 @@ const A = {
     const inp = document.getElementById('onbName'); const n = normalizeName(inp.value);
     if (!n) { inp.focus(); return; }
     inp.blur();
-    S.settings.userName = n; S.onboarded = true;
+    S.settings.userName = n; S.onboarded = true; D.requestPersist();
     if (!S.programs.length) D.createProgram('برنامهٔ من');
     D.save(true); render(true);
   },
