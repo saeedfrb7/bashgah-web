@@ -1,5 +1,5 @@
 // Offline-first service worker: precache the whole app, serve from cache, refresh in background.
-const VERSION = 'bashgah-v1.1.1';
+const VERSION = 'bashgah-v1.1.2';
 const ASSETS = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/store.js', 'js/util.js', 'js/icons.js',

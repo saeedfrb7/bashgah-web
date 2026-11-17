@@ -249,3 +249,10 @@ body.resting .with-nav .scroll{padding-bottom:110px}
 @keyframes sspulse{0%{box-shadow:0 0 0 0 rgba(255,107,44,.55)}100%{box-shadow:0 0 0 14px rgba(255,107,44,0)}}
 
 .onbhint{margin-top:18px;text-align:start;width:100%}
+
+/* sheet header with close */
+.sheet .shd{position:sticky;top:-10px;z-index:2;display:flex;align-items:center;gap:8px;background:var(--surface);margin:0 -4px 10px;padding:2px 4px 4px}
+.sheet .shd h3{flex:1;margin:0;min-width:0}
+.sheet .shd h3:empty{visibility:hidden}
+.sheet .sx{flex:none;width:40px;height:40px;border-radius:50%;background:var(--elev,#1d2230);color:#AEB6C6}
+.full .fx{position:absolute;top:calc(var(--sat) + 10px);inset-inline-end:14px;width:46px;height:46px;border-radius:50%;background:#1a1f2b;color:#AEB6C6}

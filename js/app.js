@@ -4,7 +4,7 @@ import { fa, weightFa, groupedFa, clockFa, durationFa, restFa, setFa, targetFa, 
   jFull, jShort, jMedium, jNum, timeFa, weekStart, addDays, startOfDay, WEEK_SHORT, jOf } from './util.js';
 import { ic } from './icons.js';
 
-const VERSION = '1.1.1';
+const VERSION = '1.1.2';
 const $app = document.getElementById('app');
 const $ov = document.getElementById('ov');
 const ui = {
@@ -130,6 +130,7 @@ function prToast(html) {
 // ============================================================ render
 let lastKey = null;
 function render(navChanged = false) {
+  syncHistory();
   if (!S.onboarded) { $app.className = ''; $app.innerHTML = viewOnboarding(); renderRestBar(); renderOverlay(); return; }
   const t = top();
   let view;
@@ -550,11 +551,15 @@ function renderOverlay() {
   const sTop = prevSheet ? prevSheet.scrollTop : 0;
   $ov.innerHTML = h;
   const ns = document.getElementById('sheet');
+  if (ui.sheet && ui.sheet !== sheetOpened) { sheetOpened = ui.sheet; sheetSnap = sheetSig(); }
+  if (!ui.sheet) sheetOpened = null;
+  if (ns) bindSheetSwipe(ns);
+  syncHistory();
   if (ns && prevSheet) { ns.style.animation = 'none'; ns.scrollTop = sTop; const sc = $ov.querySelector('.scrim'); if (sc) sc.style.animation = 'none'; }
 }
 function fullRestHtml() {
   const r = S.rest; const rem = Math.max(0, (r.endAt - Date.now()) / 1000); const C = 2 * Math.PI * 46;
-  return `<div class="full" data-a="closeFull"><div class="lab">${r.kind === 'timer' ? 'تایمر' : 'استراحت'}</div>
+  return `<div class="full" data-a="closeFull"><button class="iconbtn fx" data-a="closeFull" aria-label="بستن">${ic('down', 24)}</button><div class="lab">${r.kind === 'timer' ? 'تایمر' : 'استراحت'}</div>
     <div class="bigring"><svg viewBox="0 0 100 100"><defs><linearGradient id="rg"><stop offset="0" stop-color="#FF4E2A"/><stop offset="1" stop-color="#FF9F43"/></linearGradient></defs><circle cx="50" cy="50" r="46" stroke="#1F2430" stroke-width="5" fill="none"/><circle id="bigarc" cx="50" cy="50" r="46" stroke="url(#rg)" stroke-width="5" fill="none" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - rem / r.total)}"/></svg><div class="tt" data-tick="rest">${clockFa(Math.ceil(rem))}</div></div>
     <div class="nx">${esc(r.info || '')}</div>
     <div class="acts"><button class="btn sec" data-a="restAdj" data-d="-15"><span dir="ltr">−۱۵</span></button><button class="btn sec" data-a="restAdj" data-d="15"><span dir="ltr">+۱۵</span></button></div>
@@ -580,12 +585,14 @@ function sugsHtml(q) {
   return S.exercises.map((e) => e.name).filter((x) => x !== n && (!n || x.includes(n))).slice(0, 12)
     .map((x) => `<button class="chip" data-a="pickSug" data-k="${esc(x)}">${esc(x)}</button>`).join('');
 }
+/** Sheet header: grab handle, title and a ✕ close button (end side). */
+function shd(title = '') { return `<div class="grab"></div><div class="shd"><h3 class="ell">${title}</h3><button class="iconbtn sx" data-a="closeSheet" aria-label="بستن">${ic('x', 22)}</button></div>`; }
 function sheetHtml() {
   const s = ui.sheet; const g = '<div class="grab"></div>';
-  if (s.type === 'menu') return g + (s.title ? `<h3 class="ell">${esc(s.title)}</h3>` : '') + `<div class="menu">${s.items.map((it, i) => `<button class="${it.danger ? 'danger' : ''}" data-a="menuPick" data-i="${i}">${ic(it.icon, 22, it.danger ? '' : 'muted')}${esc(it.label)}</button>`).join('')}</div>`;
+  if (s.type === 'menu') return shd(s.title ? esc(s.title) : '') + `<div class="menu">${s.items.map((it, i) => `<button class="${it.danger ? 'danger' : ''}" data-a="menuPick" data-i="${i}">${ic(it.icon, 22, it.danger ? '' : 'muted')}${esc(it.label)}</button>`).join('')}</div>`;
   if (s.type === 'exercise') {
     const f = s.f; const u = f.timed ? 'ثانیه' : 'تکرار';
-    return g + `<h3>${s.deId ? 'ویرایش' : 'حرکت جدید'}</h3>
+    return shd(s.deId ? 'ویرایش' : 'حرکت جدید') + `
       <input class="field" id="exName" placeholder="نام حرکت" value="${esc(f.name)}" maxlength="60" enterkeyhint="done" autocomplete="off">
       <div class="sugs" id="sugs">${sugsHtml(f.name)}</div>
       <div class="row" style="margin-top:14px"><div class="seg grow"><button class="${!f.timed ? 'on' : ''}" data-a="fTimed" data-k="0">تکرار</button><button class="${f.timed ? 'on' : ''}" data-a="fTimed" data-k="1">ثانیه</button></div>
@@ -599,7 +606,7 @@ function sheetHtml() {
   }
   if (s.type === 'addSe') {
     const f = s.f;
-    return g + `<h3>افزودن حرکت</h3><input class="field" id="exName" placeholder="نام حرکت" value="${esc(f.name)}" maxlength="60" autocomplete="off" enterkeyhint="done">
+    return shd('افزودن حرکت') + `<input class="field" id="exName" placeholder="نام حرکت" value="${esc(f.name)}" maxlength="60" autocomplete="off" enterkeyhint="done">
       <div class="sugs" id="sugs">${sugsHtml(f.name)}</div>
       <div class="seg" style="margin-top:14px"><button class="${!f.timed ? 'on' : ''}" data-a="fTimed" data-k="0">تکرار</button><button class="${f.timed ? 'on' : ''}" data-a="fTimed" data-k="1">ثانیه</button></div>
       <div class="lbl">ست</div>${stepper('sets', fa(f.sets))}
@@ -607,14 +614,14 @@ function sheetHtml() {
   }
   if (s.type === 'set') {
     const x = D.byId(S.sets, s.setId); if (!x) return '';
-    return g + `<h3 class="ell">${esc(s.name)} · ست ${fa(x.setIndex + 1)}</h3>
+    return shd(`${esc(s.name)} · ست ${fa(x.setIndex + 1)}`) + `
       <div class="lbl">کیلو</div>${stepper('w', s.w > 0 ? weightFa(s.w) : '', true, true, 'decimal')}
       <div class="lbl">${s.timed ? 'ثانیه' : 'تکرار'}</div>${stepper('r', fa(s.r), true, true, 'numeric')}
       <div class="row" style="gap:10px;margin-top:20px">${x.isDone ? '' : `<button class="btn" data-a="setSave" data-k="1">${ic('check', 22)} ثبت ست</button>`}<button class="btn ${x.isDone ? '' : 'sec'}" data-a="setSave" data-k="0" ${x.isDone ? '' : 'style="flex:0 0 112px"'}>ذخیره</button></div>`;
   }
   if (s.type === 'timer') {
     const sw = ui.sw; const swSec = (sw.acc + (sw.startAt ? Date.now() - sw.startAt : 0)) / 1000;
-    return g + `<div class="seg" style="margin-bottom:16px"><button class="${s.tab === 'cd' ? 'on' : ''}" data-a="tTab" data-k="cd">تایمر</button><button class="${s.tab === 'sw' ? 'on' : ''}" data-a="tTab" data-k="sw">کرنومتر</button></div>` +
+    return shd('تایمر') + `<div class="seg" style="margin-bottom:16px"><button class="${s.tab === 'cd' ? 'on' : ''}" data-a="tTab" data-k="cd">تایمر</button><button class="${s.tab === 'sw' ? 'on' : ''}" data-a="tTab" data-k="sw">کرنومتر</button></div>` +
       (s.tab === 'cd'
         ? `${stepper('tsec', clockFa(s.sec), true)}<div class="chips" style="margin-top:12px;justify-content:center">${[30, 60, 90, 120, 180, 300].map((v) => `<button class="chip ${s.sec === v ? 'sel' : ''}" data-a="tPreset" data-k="${v}">${restFa(v)}</button>`).join('')}</div>
            <button class="btn" style="margin-top:18px" data-a="tStart">${ic('play', 20)} شروع</button>`
@@ -622,17 +629,83 @@ function sheetHtml() {
            <div class="row" style="gap:10px"><button class="btn" data-a="swToggle">${sw.startAt ? 'مکث' : 'شروع'}</button><button class="btn sec" data-a="swReset" style="flex:.6">صفر</button></div>`);
   }
   if (s.type === 'text') {
-    return g + `<h3>${esc(s.title)}</h3>${s.multi ? `<textarea class="field" id="txt" rows="3" maxlength="200">${esc(s.value)}</textarea>` : `<input class="field" id="txt" value="${esc(s.value)}" maxlength="40" placeholder="${esc(s.ph || '')}" enterkeyhint="done" autocomplete="off">`}
+    return shd(esc(s.title)) + `${s.multi ? `<textarea class="field" id="txt" rows="3" maxlength="200">${esc(s.value)}</textarea>` : `<input class="field" id="txt" value="${esc(s.value)}" maxlength="40" placeholder="${esc(s.ph || '')}" enterkeyhint="done" autocomplete="off">`}
       <button class="btn" style="margin-top:16px" data-a="textOk">ذخیره</button>`;
   }
   return '';
 }
 function dialogHtml() {
   const d = ui.dialog;
-  return `<h3>${esc(d.title)}</h3>${d.text ? `<p>${esc(d.text)}</p>` : ''}<div class="acts"><button class="btn sec" data-a="closeDialog">بستن</button><button class="btn ${d.danger ? 'danger' : ''}" data-a="dialogOk">${esc(d.ok)}</button></div>`;
+  return `<h3>${esc(d.title)}</h3>${d.text ? `<p>${esc(d.text)}</p>` : ''}<div class="acts"><button class="btn sec" data-a="closeDialog">${esc(d.cancel || 'بستن')}</button><button class="btn ${d.danger ? 'danger' : ''}" data-a="dialogOk">${esc(d.ok)}</button></div>`;
 }
+// ------------------------------------------------------------ closing sheets / back
+let sheetOpened = null, sheetSnap = '';
+const EDIT_SHEETS = ['exercise', 'addSe', 'set', 'text'];
+function sheetSig() {
+  const el = document.getElementById('sheet');
+  const vals = el ? [...el.querySelectorAll('input,textarea')].map((i) => i.value).join('\u0001') : '';
+  return JSON.stringify(ui.sheet, (k, v) => (typeof v === 'function' ? undefined : v)) + '|' + vals;
+}
+const sheetDirty = () => !!ui.sheet && EDIT_SHEETS.includes(ui.sheet.type) && sheetSig() !== sheetSnap;
+function forceCloseSheet() { document.activeElement?.blur?.(); ui.sheet = null; renderOverlay(); }
+/** Close the sheet; when it has unsaved edits ask first. */
+function requestCloseSheet() {
+  if (!ui.sheet) return;
+  if (sheetDirty()) { document.activeElement?.blur?.(); confirmDlg('تغییرات ذخیره نشه؟', '', 'دور بریز', forceCloseSheet, true, 'ادامه ویرایش'); return; }
+  forceCloseSheet();
+}
+/** Close the top-most layer (dialog > sheet > full rest > screen). Returns false at the root. */
+function closeTop() {
+  if (ui.dialog) { ui.dialog = null; renderOverlay(); return true; }
+  if (ui.sheet) { requestCloseSheet(); return true; }
+  if (ui.fullRest) { A.closeFull(); return true; }
+  if (ui.stack.length) { pop(); return true; }
+  return false;
+}
+// Swipe the sheet down to close (from its top, or anywhere when it isn't scrolled).
+function bindSheetSwipe(el) {
+  if (el._sw) return; el._sw = true;
+  let y0 = null, dy = 0, fromHead = false;
+  el.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 1) { y0 = null; return; }
+    fromHead = !!e.target.closest('.grab,.shd');
+    if (el.scrollTop > 0 && !fromHead) { y0 = null; return; }
+    y0 = e.touches[0].clientY; dy = 0;
+  }, { passive: true });
+  el.addEventListener('touchmove', (e) => {
+    if (y0 == null) return;
+    dy = e.touches[0].clientY - y0;
+    if (dy > 0) { if (e.cancelable) e.preventDefault(); el.style.transition = 'none'; el.style.transform = `translateY(${dy}px)`; }
+  }, { passive: false });
+  el.addEventListener('touchend', () => {
+    if (y0 == null) return; y0 = null;
+    el.style.transition = 'transform .2s ease'; el.style.transform = '';
+    if (dy > 110) requestCloseSheet();
+    dy = 0;
+  });
+}
+// Browser back / swipe-back closes layers instead of leaving the app: one history entry per open layer.
+let hDepth = 0, ignorePop = 0;
+function layerDepth() { return ui.stack.length + (ui.sheet ? 1 : 0) + (ui.dialog ? 1 : 0) + (ui.fullRest ? 1 : 0); }
+let syncT = null;
+function syncHistory() { if (!syncT) syncT = setTimeout(doSyncHistory, 0); }
+function doSyncHistory() {
+  syncT = null;
+  if (!S.onboarded || ignorePop > 0) return; // a traversal is in flight; re-synced on its popstate
+  const want = layerDepth();
+  try {
+    while (hDepth < want) { history.pushState({ bashgah: ++hDepth }, ''); }
+    if (hDepth > want) { ignorePop++; history.go(want - hDepth); hDepth = want; }
+  } catch {}
+}
+window.addEventListener('popstate', () => {
+  if (ignorePop > 0) { ignorePop--; syncHistory(); return; }
+  hDepth = Math.max(0, hDepth - 1);
+  if (!closeTop()) return;
+  syncHistory();
+});
 function openMenu(title, items) { ui.sheet = { type: 'menu', title, items }; renderOverlay(); }
-function confirmDlg(title, text, ok, fn, danger = true) { ui.dialog = { title, text, ok, fn, danger }; renderOverlay(); }
+function confirmDlg(title, text, ok, fn, danger = true, cancel = '') { ui.dialog = { title, text, ok, fn, danger, cancel }; renderOverlay(); }
 function textSheet(title, value, fn, opts = {}) { ui.sheet = { type: 'text', title, value, fn, ...opts }; renderOverlay(); setTimeout(() => document.getElementById('txt')?.focus(), 60); }
 
 // ============================================================ timers (timestamp based: correct after returning from background)
@@ -967,7 +1040,7 @@ const A = {
   exportCsv: () => shareFile(`bashgah-${stamp()}.csv`, D.csv(), 'text/csv'),
   importJson: () => document.getElementById('fileIn').click(),
   wipe: () => confirmDlg('پاک کردن همه؟', 'همهٔ برنامه‌ها و تاریخچه پاک می‌شن.', 'پاک کن', () => { D.resetAll(); ui.stack = []; ui.tab = 'home'; ui.onbName = ''; render(true); }),
-  closeSheet: () => { document.activeElement?.blur?.(); ui.sheet = null; renderOverlay(); },
+  closeSheet: () => requestCloseSheet(),
   closeDialog: () => { ui.dialog = null; renderOverlay(); },
   dialogOk: () => { const f = ui.dialog.fn; ui.dialog = null; renderOverlay(); f(); },
   menuPick: (d) => { const it = ui.sheet.items[+d.i]; ui.sheet = null; renderOverlay(); it.fn(); },
@@ -981,7 +1054,7 @@ document.addEventListener('click', (ev) => {
   const el = ev.target.closest('[data-a]'); if (!el) return;
   const fn = A[el.dataset.a]; if (!fn) return;
   // a tap on a button inside the full-screen timer must not also close it
-  if (el.dataset.a === 'closeFull' && ev.target.closest('button')) return;
+  if (el.classList.contains('full') && ev.target.closest('button')) return;
   ev.stopPropagation();
   fn(el.dataset, el, ev);
 });
@@ -994,6 +1067,7 @@ document.addEventListener('input', (ev) => {
   if (t.id === 'recQ') { ui.recQuery = t.value; document.getElementById('recList').innerHTML = recList(); }
 });
 document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape') { if (closeTop()) ev.preventDefault(); return; }
   if (ev.key !== 'Enter') return;
   const t = ev.target;
   if (t.id === 'onbName') { ev.preventDefault(); A.onbDone(); }
