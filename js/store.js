@@ -559,3 +559,56 @@ export function csv() {
   }
   return out;
 }
+
+// ------------------------------------------------------------ program sharing (format in share.js)
+/** A program in the neutral sharing shape: {name, days:[{name, exercises:[{name, sets, repMin, repMax, timed, perSide, restSec, weight, note, group}]}]} */
+export function programSpec(pid) {
+  const p = program(pid); if (!p) return null;
+  return {
+    name: p.name,
+    days: daysOf(pid).map((d) => ({
+      name: d.name || '',
+      exercises: dayExercisesOf(d.id).map((x) => {
+        const e = exercise(x.exerciseId) || {};
+        return { name: e.name || '', sets: x.targetSets, repMin: x.repMin, repMax: x.repMax, timed: !!e.timed, perSide: !!e.perSide,
+          restSec: x.restSec, weight: x.targetWeight || null, note: x.note || null, group: x.supersetId != null ? String(x.supersetId) : null };
+      }),
+    })),
+  };
+}
+/** Name not used by another program: «X», «X (۲)», «X (۳)»… */
+export function uniqueProgramName(name) {
+  const base = normalizeName(name) || 'برنامهٔ وارد‌شده';
+  const used = new Set(S.programs.map((p) => p.name));
+  if (!used.has(base)) return base;
+  for (let n = 2; ; n++) { const c = `${base} (${fa(n)})`; if (!used.has(c)) return c; }
+}
+/** Adds the program as a NEW program (never touches existing ones) and makes it active. Returns its id. */
+export function importProgram(spec) {
+  const p = { id: id(), name: uniqueProgramName(spec.name), isActive: false, createdAt: Date.now() };
+  S.programs.push(p);
+  const days = spec.days.length ? spec.days : [{ name: '', exercises: [] }];
+  days.forEach((d, i) => {
+    const day = { id: id(), programId: p.id, position: i, name: normalizeName(d.name || '') };
+    S.days.push(day);
+    const gids = new Map();
+    let prev = null;
+    d.exercises.forEach((x, k) => {
+      let gid = null;
+      if (x.group != null) {
+        // a label only groups consecutive exercises
+        if (prev && prev.group === x.group) gid = gids.get(x.group);
+        else { gid = id(); gids.set(x.group, gid); }
+      }
+      const exId = exerciseIdFor(x.name, !!x.timed, !!x.perSide);
+      S.dayExercises.push({ id: id(), dayId: day.id, exerciseId: exId, position: k, targetSets: x.sets, repMin: x.repMin, repMax: Math.max(x.repMin, x.repMax),
+        targetWeight: x.weight || null, restSec: x.restSec, note: x.note || null, supersetId: gid });
+      prev = x;
+    });
+    const l = dayExercisesOf(day.id); normalizeSupersets(l);
+    for (const b of blocksOf(l)) if (b.gid != null) { const r = b.items[b.items.length - 1].restSec; b.items.forEach((y) => (y.restSec = r)); }
+  });
+  setActiveProgram(p.id);
+  save(true);
+  return p.id;
+}

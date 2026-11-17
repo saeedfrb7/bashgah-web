@@ -3,8 +3,9 @@ import { S } from './store.js';
 import { fa, weightFa, groupedFa, clockFa, durationFa, restFa, setFa, targetFa, secFa, esc, normalizeName, parseWeight, parseReps, num,
   jFull, jShort, jMedium, jNum, timeFa, weekStart, addDays, startOfDay, WEEK_SHORT, jOf } from './util.js';
 import { ic } from './icons.js';
+import * as P from './share.js';
 
-const VERSION = '1.1.2';
+const VERSION = '1.2.0';
 const $app = document.getElementById('app');
 const $ov = document.getElementById('ov');
 const ui = {
@@ -234,7 +235,7 @@ function viewProgram() {
   let h = `<div class="top"><h1 class="ell">${p ? esc(p.name) : 'برنامه'}</h1>${p ? `<button class="iconbtn fill" data-a="programMenu" aria-label="گزینه‌ها">${ic('more')}</button>` : ''}</div>`;
   if (S.programs.length > 1) h += `<div class="hscroll">${S.programs.map((x) => `<button class="chip ${x.isActive ? 'sel' : ''}" data-a="activateProgram" data-id="${x.id}">${esc(x.name)}</button>`).join('')}</div>`;
   if (!p) {
-    h += `<div class="empty"><div class="ebig">${ic('program', 40)}</div><h3>برنامه‌ای نداری</h3><button class="btn" data-a="newProgram">${ic('plus', 22)} ساخت برنامه</button></div>`;
+    h += `<div class="empty"><div class="ebig">${ic('program', 40)}</div><h3>برنامه‌ای نداری</h3><button class="btn" data-a="newProgram">${ic('plus', 22)} ساخت برنامه</button><button class="btn ghost" style="margin-top:10px" data-a="importOpen">${ic('upload', 20)} وارد کردن برنامه</button></div>`;
     return { html: h };
   }
   for (const d of D.daysOf(p.id)) {
@@ -244,6 +245,7 @@ function viewProgram() {
       <button class="iconbtn" data-a="dayMenu" data-id="${d.id}" aria-label="گزینه‌ها">${ic('more')}</button></div>`;
   }
   h += `<button class="btn sec" data-a="addDay" style="margin-top:6px">${ic('plus', 22)} افزودن روز</button>`;
+  h += `<div class="row" style="gap:10px;margin-top:12px"><button class="btn ghost grow" data-a="shareProgram" data-id="${p.id}">${ic('share', 20)} اشتراک‌گذاری</button><button class="btn ghost grow" data-a="importOpen">${ic('upload', 20)} وارد کردن</button></div>`;
   return { html: h };
 }
 
@@ -628,6 +630,28 @@ function sheetHtml() {
         : `<div class="swt" data-tick="sw">${clockFa(swSec)}</div>
            <div class="row" style="gap:10px"><button class="btn" data-a="swToggle">${sw.startAt ? 'مکث' : 'شروع'}</button><button class="btn sec" data-a="swReset" style="flex:.6">صفر</button></div>`);
   }
+  if (s.type === 'share') {
+    const sm = P.summaryOf(s.spec);
+    return shd('اشتراک‌گذاری') + `<div class="card prevc"><div class="t2 ell">${esc(s.spec.name)}</div><div class="chips" style="margin-top:8px">${statChips(sm)}</div></div>
+      <button class="btn" data-a="shareSend">${ic('share', 22)} ارسال</button>
+      <button class="btn sec" style="margin-top:10px" data-a="shareCopy">${ic('copy', 20)} کپی متن</button>
+      <div class="muted small center" style="margin-top:12px">روی آیفون و اندروید با «وارد کردن» باز می‌شه.</div>`;
+  }
+  if (s.type === 'import') {
+    return shd('وارد کردن برنامه') + `<textarea class="field imptxt" id="impTxt" rows="6" dir="auto" placeholder="متن برنامه یا جواب ChatGPT رو اینجا بچسبون" autocomplete="off" spellcheck="false">${esc(s.text || '')}</textarea>
+      ${s.err ? `<div class="imperr">${ic('info', 16)} ${esc(s.err)}</div>` : ''}
+      <div class="row" style="gap:10px;margin-top:10px"><button class="btn sec grow" data-a="impPaste">${ic('copy', 20)} چسباندن</button><button class="btn sec grow" data-a="impFile">${ic('file', 20)} فایل</button></div>
+      <button class="btn" style="margin-top:12px" data-a="impNext">ادامه</button>
+      <button class="btn ghost" style="margin-top:6px" data-a="copyPrompt">${ic('bolt', 20)} متن برای ChatGPT</button>
+      <input type="file" id="progFile" accept=".json,.txt,application/json,text/plain" class="hidden">`;
+  }
+  if (s.type === 'importPreview') {
+    const sm = P.summaryOf(s.spec);
+    return shd('پیش‌نمایش') + `<div class="card prevc"><div class="t2 ell">${esc(D.uniqueProgramName(s.spec.name))}</div><div class="chips" style="margin-top:8px">${statChips(sm)}</div></div>
+      <div class="prevdays">${s.spec.days.map((d, i) => `<div class="prevday"><span class="badge sm">${fa(i + 1)}</span><div class="grow" style="min-width:0"><div class="t2 ell">${d.name ? esc(d.name) : `روز ${fa(i + 1)}`}</div><div class="muted small ell">${d.exercises.map((x) => esc(x.name)).join('، ') || 'خالی'}</div></div><span class="muted small">${fa(d.exercises.length)}</span></div>`).join('')}</div>
+      ${s.warnings?.length ? `<div class="muted small" style="margin-top:8px">${s.warnings.map(esc).join(' · ')}</div>` : ''}
+      <div class="row" style="gap:10px;margin-top:16px"><button class="btn sec" style="flex:0 0 110px" data-a="impBack">برگشت</button><button class="btn grow" data-a="impDo">${ic('check', 22)} وارد کن</button></div>`;
+  }
   if (s.type === 'text') {
     return shd(esc(s.title)) + `${s.multi ? `<textarea class="field" id="txt" rows="3" maxlength="200">${esc(s.value)}</textarea>` : `<input class="field" id="txt" value="${esc(s.value)}" maxlength="40" placeholder="${esc(s.ph || '')}" enterkeyhint="done" autocomplete="off">`}
       <button class="btn" style="margin-top:16px" data-a="textOk">ذخیره</button>`;
@@ -640,13 +664,13 @@ function dialogHtml() {
 }
 // ------------------------------------------------------------ closing sheets / back
 let sheetOpened = null, sheetSnap = '';
-const EDIT_SHEETS = ['exercise', 'addSe', 'set', 'text'];
+const EDIT_SHEETS = ['exercise', 'addSe', 'set', 'text', 'import'];
 function sheetSig() {
   const el = document.getElementById('sheet');
   const vals = el ? [...el.querySelectorAll('input,textarea')].map((i) => i.value).join('\u0001') : '';
   return JSON.stringify(ui.sheet, (k, v) => (typeof v === 'function' ? undefined : v)) + '|' + vals;
 }
-const sheetDirty = () => !!ui.sheet && EDIT_SHEETS.includes(ui.sheet.type) && sheetSig() !== sheetSnap;
+const sheetDirty = () => !!ui.sheet && (ui.sheet.type === 'import' ? !!document.getElementById('impTxt')?.value.trim() : ui.sheet.type === 'importPreview' || (EDIT_SHEETS.includes(ui.sheet.type) && sheetSig() !== sheetSnap));
 function forceCloseSheet() { document.activeElement?.blur?.(); ui.sheet = null; renderOverlay(); }
 /** Close the sheet; when it has unsaved edits ask first. */
 function requestCloseSheet() {
@@ -704,6 +728,18 @@ window.addEventListener('popstate', () => {
   if (!closeTop()) return;
   syncHistory();
 });
+function statChips(sm) {
+  return `<span class="chip sm">${ic('calendar', 13)} ${fa(sm.days)} روز</span><span class="chip sm">${ic('dumbbell', 13)} ${fa(sm.exercises)} حرکت</span>${sm.supersets ? `<span class="chip sm">${ic('link', 13)} ${fa(sm.supersets)} سوپرست</span>` : ''}`;
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; } catch {}
+  try { const ta = document.createElement('textarea'); ta.value = t; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;opacity:0;top:0'; document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, t.length); const ok = document.execCommand('copy'); ta.remove(); return ok; } catch { return false; }
+}
+function importParse(text) {
+  const r = P.parseProgram(text);
+  if (!r.ok) { ui.sheet = { type: 'import', text, err: r.error + ' — متن کامل رو بچسبون' }; renderOverlay(); return; }
+  haptic(); ui.sheet = { type: 'importPreview', spec: r.program, warnings: r.warnings, text }; renderOverlay();
+}
 function openMenu(title, items) { ui.sheet = { type: 'menu', title, items }; renderOverlay(); }
 function confirmDlg(title, text, ok, fn, danger = true, cancel = '') { ui.dialog = { title, text, ok, fn, danger, cancel }; renderOverlay(); }
 function textSheet(title, value, fn, opts = {}) { ui.sheet = { type: 'text', title, value, fn, ...opts }; renderOverlay(); setTimeout(() => document.getElementById('txt')?.focus(), 60); }
@@ -867,6 +903,8 @@ const A = {
     const p = D.activeProgram();
     openMenu(p.name, [
       { icon: 'edit', label: 'تغییر نام', fn: () => textSheet('تغییر نام', p.name, (v) => { D.renameProgram(p.id, v); render(); }) },
+      { icon: 'share', label: 'اشتراک‌گذاری', fn: () => A.shareProgram({ id: p.id }) },
+      { icon: 'upload', label: 'وارد کردن برنامه', fn: () => A.importOpen() },
       { icon: 'plus', label: 'برنامهٔ جدید', fn: () => A.newProgram() },
       { icon: 'trash', label: 'حذف', danger: true, fn: () => confirmDlg(`حذف «${p.name}»؟`, 'تاریخچه و رکوردها می‌مونن.', 'حذف', () => { D.deleteProgram(p.id); render(); }) },
     ]);
@@ -1041,6 +1079,30 @@ const A = {
   importJson: () => document.getElementById('fileIn').click(),
   wipe: () => confirmDlg('پاک کردن همه؟', 'همهٔ برنامه‌ها و تاریخچه پاک می‌شن.', 'پاک کن', () => { D.resetAll(); ui.stack = []; ui.tab = 'home'; ui.onbName = ''; render(true); }),
   closeSheet: () => requestCloseSheet(),
+  shareProgram: (d) => { const spec = D.programSpec(+d.id); if (spec) { ui.sheet = { type: 'share', spec }; renderOverlay(); } },
+  shareSend: async () => {
+    const spec = ui.sheet.spec; const text = P.toText(spec); const name = P.fileName(spec.name);
+    try {
+      const file = new File([text], name, { type: 'application/json' });
+      if (navigator.canShare?.({ files: [file] })) { await navigator.share({ files: [file], title: spec.name }); return; }
+      if (navigator.share) { await navigator.share({ title: spec.name, text }); return; }
+    } catch (e) { if (e?.name === 'AbortError') return; }
+    shareFile(name, text, 'application/json');
+  },
+  shareCopy: async () => { toast((await copyText(P.toText(ui.sheet.spec))) ? 'کپی شد ✅' : 'کپی نشد'); },
+  copyPrompt: async () => { toast((await copyText(P.CHATGPT_PROMPT)) ? 'کپی شد؛ توی ChatGPT بچسبون و هدفت رو بنویس ✅' : 'کپی نشد'); },
+  importOpen: () => { ui.sheet = { type: 'import', text: '' }; renderOverlay(); },
+  impPaste: async () => {
+    try { const t = await navigator.clipboard.readText(); if (t) { importParse(t); return; } } catch {}
+    const ta = document.getElementById('impTxt'); ta?.focus(); toast('نگه دار و «Paste» رو بزن');
+  },
+  impFile: () => document.getElementById('progFile')?.click(),
+  impNext: () => importParse(document.getElementById('impTxt')?.value || ''),
+  impBack: () => { ui.sheet = { type: 'import', text: ui.sheet.text || '' }; renderOverlay(); },
+  impDo: () => {
+    const pid = D.importProgram(ui.sheet.spec); const name = D.program(pid)?.name || '';
+    ui.sheet = null; ui.tab = 'program'; ui.stack = []; haptic(); render(true); toast(`«${name}» اضافه شد ✅`);
+  },
   closeDialog: () => { ui.dialog = null; renderOverlay(); },
   dialogOk: () => { const f = ui.dialog.fn; ui.dialog = null; renderOverlay(); f(); },
   menuPick: (d) => { const it = ui.sheet.items[+d.i]; ui.sheet = null; renderOverlay(); it.fn(); },
@@ -1081,6 +1143,7 @@ document.addEventListener('focusout', (ev) => {
   setTimeout(() => { const a = document.activeElement; if (!a || a === document.body) window.scrollTo(0, 0); }, 60);
 });
 document.addEventListener('change', async (ev) => {
+  if (ev.target.id === 'progFile') { const f = ev.target.files[0]; ev.target.value = ''; if (f) importParse(await f.text()); return; }
   if (ev.target.id !== 'fileIn') return;
   const f = ev.target.files[0]; ev.target.value = ''; if (!f) return;
   try {

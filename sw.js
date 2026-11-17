@@ -1,8 +1,8 @@
 // Offline-first service worker: precache the whole app, serve from cache, refresh in background.
-const VERSION = 'bashgah-v1.1.2';
+const VERSION = 'bashgah-v1.2.0';
 const ASSETS = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
-  'js/app.js', 'js/store.js', 'js/util.js', 'js/icons.js',
+  'js/app.js', 'js/store.js', 'js/util.js', 'js/icons.js', 'js/share.js',
   'fonts/vazir-400.woff2', 'fonts/vazir-500.woff2', 'fonts/vazir-700.woff2', 'fonts/vazir-800.woff2', 'fonts/vazir-900.woff2',
   'icons/apple-touch-icon.png', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/favicon-32.png',
 ];
